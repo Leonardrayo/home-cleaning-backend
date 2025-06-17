@@ -9,8 +9,8 @@ const PORT = process.env.PORT || 3000;
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// 🔐 Initialize Firebase Admin SDK
-const serviceAccount = require("./serviceAccountKey.json"); // 👈 replace with your actual service account file
+// 🔐 Initialize Firebase Admin SDK using env variable instead of JSON file
+const serviceAccount = JSON.parse(process.env.GOOGLE_CREDENTIALS);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -40,7 +40,7 @@ app.post("/send-email", async (req, res) => {
   }
 });
 
-// 👇 New Endpoint to get all cleaners
+// 👇 Endpoint to get all cleaners
 app.get("/cleaners", async (req, res) => {
   try {
     const snapshot = await db.collection("cleaners").get();
