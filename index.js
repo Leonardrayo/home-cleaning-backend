@@ -1,5 +1,6 @@
 const express = require("express");
 const dotenv = require("dotenv");
+const cors = require("cors"); // ✅ Added
 const { Resend } = require("resend");
 const admin = require("firebase-admin");
 
@@ -8,6 +9,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 const resend = new Resend(process.env.RESEND_API_KEY);
+
+// ✅ Enable CORS for all routes
+app.use(cors());
 
 // 🔐 Initialize Firebase Admin SDK using env variable instead of JSON file
 const serviceAccount = JSON.parse(process.env.GOOGLE_CREDENTIALS);
