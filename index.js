@@ -1,6 +1,6 @@
 const express = require("express");
 const dotenv = require("dotenv");
-const cors = require("cors"); // ✅ Added
+const cors = require("cors");
 const { Resend } = require("resend");
 const admin = require("firebase-admin");
 
@@ -10,10 +10,10 @@ const PORT = process.env.PORT || 3000;
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// ✅ Enable CORS for all routes
+// Enable CORS
 app.use(cors());
 
-// 🔐 Initialize Firebase Admin SDK using env variable instead of JSON file
+// Initialize Firebase Admin SDK
 const serviceAccount = JSON.parse(process.env.GOOGLE_CREDENTIALS);
 
 admin.initializeApp({
@@ -44,14 +44,19 @@ app.post("/send-email", async (req, res) => {
   }
 });
 
-// 👇 Endpoint to get all cleaners
+// 👇 Get all cleaners (normalized response)
 app.get("/cleaners", async (req, res) => {
   try {
     const snapshot = await db.collection("cleaners").get();
-    const cleaners = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const cleaners = snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        name: data.name || data.Name || '',
+        email: data.email || data.Email || '',
+        status: (data.status || data.Status || '').toLowerCase(),
+      };
+    });
 
     res.status(200).json(cleaners);
   } catch (error) {
