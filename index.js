@@ -88,7 +88,7 @@ app.get("/mpesa/token", async (req, res) => {
       "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
       {
         headers: {
-          Authorization: Basic `${auth}`,
+          Authorization: `Basic ${auth}`,
         },
       }
     );
