@@ -1,11 +1,10 @@
-// ... existing imports
 const express = require("express");
 const dotenv = require("dotenv");
 const cors = require("cors");
 const { Resend } = require("resend");
 const admin = require("firebase-admin");
 const axios = require("axios");
-const moment = require("moment"); // For timestamp formatting
+const moment = require("moment");
 
 dotenv.config();
 
@@ -14,7 +13,7 @@ const PORT = process.env.PORT || 5000;
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// CORS setup
+// CORS
 app.use(
   cors({
     origin: ["http://localhost:3000", "https://your-frontend-url.com"],
@@ -25,46 +24,88 @@ app.use(
 
 app.use(express.json());
 
-// Firebase Admin init
+// Firebase Admin Init
 const serviceAccount = JSON.parse(process.env.GOOGLE_CREDENTIALS);
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 const db = admin.firestore();
 
-// Health check
+// ✅ Health check
 app.get("/health", (req, res) => {
   res.status(200).send("✅ Server is up and running");
 });
 
-// === M-PESA STK PUSH ENDPOINT ===
+// 📩 Email sending
+app.post("/send-email", async (req, res) => {
+  const { to, subject, text } = req.body;
+
+  try {
+    const data = await resend.emails.send({
+      from: process.env.VERIFIED_SENDER,
+      to,
+      subject,
+      text,
+    });
+
+    res.status(200).json({ message: "Email sent successfully", data });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to send email", details: error.message });
+  }
+});
+
+// 🧹 Get all cleaners
+app.get("/cleaners", async (req, res) => {
+  try {
+    const snapshot = await db.collection("cleaners").get();
+    const cleaners = snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        name: data.name || data.Name || "",
+        email: data.email || data.Email || "",
+        status: (data.status || data.Status || "unknown").toLowerCase(),
+      };
+    });
+
+    res.status(200).json(cleaners);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch cleaners" });
+  }
+});
+
+// 💳 M-PESA STK PUSH
 app.post("/mpesa/stk-push", async (req, res) => {
   const { phoneNumber, amount } = req.body;
+
+  if (!phoneNumber || !amount) {
+    return res.status(400).json({ error: "Phone number and amount are required" });
+  }
+
+  // Format phone to 2547xxxxxxxx
+  const formattedPhone = phoneNumber.replace(/^0/, "254");
 
   try {
     const consumerKey = process.env.MPESA_CONSUMER_KEY;
     const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
     const auth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString("base64");
 
-    // Step 1: Get access token
-    const tokenResponse = await axios.get(
+    // Get OAuth token
+    const tokenRes = await axios.get(
       "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
-      {
-        headers: {
-          Authorization: `Basic ${auth}`,
-        },
-      }
+      { headers: { Authorization: `Basic ${auth}` } }
     );
 
-    const accessToken = tokenResponse.data.access_token;
+    const accessToken = tokenRes.data.access_token;
 
-    // Step 2: Initiate STK Push
+    // Generate password & timestamp
     const timestamp = moment().format("YYYYMMDDHHmmss");
     const password = Buffer.from(
       `${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`
     ).toString("base64");
 
-    const stkResponse = await axios.post(
+    // Initiate STK push
+    const stkRes = await axios.post(
       "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
       {
         BusinessShortCode: process.env.MPESA_SHORTCODE,
@@ -72,9 +113,9 @@ app.post("/mpesa/stk-push", async (req, res) => {
         Timestamp: timestamp,
         TransactionType: "CustomerPayBillOnline",
         Amount: amount,
-        PartyA: phoneNumber,
+        PartyA: formattedPhone,
         PartyB: process.env.MPESA_SHORTCODE,
-        PhoneNumber: phoneNumber,
+        PhoneNumber: formattedPhone,
         CallBackURL: process.env.MPESA_CALLBACK_URL,
         AccountReference: "HomeCleaning",
         TransactionDesc: "Home Cleaning Payment",
@@ -86,17 +127,17 @@ app.post("/mpesa/stk-push", async (req, res) => {
       }
     );
 
-    console.log("✅ STK Push initiated:", stkResponse.data);
-    res.status(200).json({ message: "STK Push initiated", data: stkResponse.data });
+    res.status(200).json({ message: "STK Push initiated", data: stkRes.data });
   } catch (error) {
-    console.error("❌ STK Push error:", error.response?.data || error.message);
-    res.status(500).json({ error: "Failed to initiate STK Push", details: error.response?.data });
+    console.error("❌ STK Push Error:", error.response?.data || error.message);
+    res.status(500).json({
+      error: "Failed to initiate STK Push",
+      details: error.response?.data || error.message,
+    });
   }
 });
 
-// ... other routes (email, cleaners, etc.)
-
-// Start server
+// 🚀 Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
