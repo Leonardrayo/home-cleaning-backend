@@ -3,8 +3,9 @@ const dotenv = require("dotenv");
 const cors = require("cors");
 const { Resend } = require("resend");
 const admin = require("firebase-admin");
-
+const axios = require("axios"); // ⬅ Added for M-Pesa
 dotenv.config();
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -76,7 +77,31 @@ app.get("/cleaners", async (req, res) => {
   }
 });
 
-// Start server
+// 💳 M-Pesa Token Route
+app.get("/mpesa/token", async (req, res) => {
+  const consumerKey = process.env.MPESA_CONSUMER_KEY;
+  const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
+  const auth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString("base64");
+
+  try {
+    const response = await axios.get(
+      "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
+      {
+        headers: {
+          Authorization: Basic `${auth}`,
+        },
+      }
+    );
+
+    console.log("🎯 M-Pesa Token Response:", response.data);
+    res.status(200).json({ access_token: response.data.access_token });
+  } catch (error) {
+    console.error("❌ Error getting M-Pesa token:", error.response?.data || error.message);
+    res.status(500).json({ error: "Failed to generate M-Pesa access token" });
+  }
+});
+
+// 🚀 Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
