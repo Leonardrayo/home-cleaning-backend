@@ -82,7 +82,6 @@ app.post("/mpesa/stk-push", async (req, res) => {
     return res.status(400).json({ error: "Phone number and amount are required" });
   }
 
-  // Format phone to 2547xxxxxxxx
   const formattedPhone = phoneNumber.replace(/^0/, "254");
 
   try {
@@ -90,7 +89,6 @@ app.post("/mpesa/stk-push", async (req, res) => {
     const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
     const auth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString("base64");
 
-    // Get OAuth token
     const tokenRes = await axios.get(
       "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
       { headers: { Authorization: `Basic ${auth}` } }
@@ -98,13 +96,11 @@ app.post("/mpesa/stk-push", async (req, res) => {
 
     const accessToken = tokenRes.data.access_token;
 
-    // Generate password & timestamp
     const timestamp = moment().format("YYYYMMDDHHmmss");
     const password = Buffer.from(
       `${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`
     ).toString("base64");
 
-    // Initiate STK push
     const stkRes = await axios.post(
       "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
       {
@@ -134,6 +130,50 @@ app.post("/mpesa/stk-push", async (req, res) => {
       error: "Failed to initiate STK Push",
       details: error.response?.data || error.message,
     });
+  }
+});
+
+// 📥 M-PESA Callback Handler
+app.post("/mpesa/callback", async (req, res) => {
+  console.log("📥 M-PESA Callback received");
+
+  const callbackData = req.body;
+
+  try {
+    const mpesaRes = callbackData?.Body?.stkCallback;
+
+    if (!mpesaRes) {
+      console.warn("⚠ Missing stkCallback in callback");
+      return res.sendStatus(200);
+    }
+
+    const {
+      MerchantRequestID,
+      CheckoutRequestID,
+      ResultCode,
+      ResultDesc,
+      CallbackMetadata,
+    } = mpesaRes;
+
+    const metadata = CallbackMetadata?.Item?.reduce((acc, item) => {
+      acc[item.Name] = item.Value;
+      return acc;
+    }, {});
+
+    await db.collection("mpesaTransactions").add({
+      MerchantRequestID,
+      CheckoutRequestID,
+      ResultCode,
+      ResultDesc,
+      metadata,
+      receivedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    console.log("✅ M-PESA transaction saved:", metadata);
+    res.sendStatus(200);
+  } catch (error) {
+    console.error("❌ Error handling callback:", error.message);
+    res.sendStatus(200);
   }
 });
 
