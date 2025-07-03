@@ -1,183 +1,52 @@
-const express = require("express");
-const dotenv = require("dotenv");
-const cors = require("cors");
-const { Resend } = require("resend");
-const admin = require("firebase-admin");
-const axios = require("axios");
-const moment = require("moment");
+// ─── Imports ────────────────────────────────────────────────────────────────
+const express  = require('express');
+const dotenv   = require('dotenv');
+const cors     = require('cors');
+const { Resend } = require('resend');
+const admin    = require('firebase-admin');
+const axios    = require('axios');
+const moment   = require('moment');
 
 dotenv.config();
 
-const app = express();
+// ─── App Setup ──────────────────────────────────────────────────────────────
+const app  = express();
 const PORT = process.env.PORT || 5000;
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// CORS
+// ----------  CORS  ----------------------------------------------------------
+// Build a whitelist from env (comma-separated) + localhost for dev
+const extraOrigins = (process.env.FRONTEND_PROD_URL || '')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
+const whitelist = ['http://localhost:3000', ...extraOrigins];
+
 app.use(
   cors({
-    origin: ["http://localhost:3000", "https://your-frontend-url.com"],
-    methods: ["GET", "POST"],
+    origin: (origin, callback) => {
+      // Allow requests with no Origin (mobile apps, curl, Postman) OR whitelisted origins
+      if (!origin || whitelist.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS: ${origin} not allowed`));
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
   })
 );
 
+// Handle the occasional pre-flight request quickly
+app.options('*', cors());
+
+// ─── Body Parsing ───────────────────────────────────────────────────────────
 app.use(express.json());
 
-// Firebase Admin Init
+// ─── Firebase Admin ─────────────────────────────────────────────────────────
 const serviceAccount = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
+admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 
-// ✅ Health check
-app.get("/health", (req, res) => {
-  res.status(200).send("✅ Server is up and running");
-});
-
-// 📩 Email sending
-app.post("/send-email", async (req, res) => {
-  const { to, subject, text } = req.body;
-
-  try {
-    const data = await resend.emails.send({
-      from: process.env.VERIFIED_SENDER,
-      to,
-      subject,
-      text,
-    });
-
-    res.status(200).json({ message: "Email sent successfully", data });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to send email", details: error.message });
-  }
-});
-
-// 🧹 Get all cleaners
-app.get("/cleaners", async (req, res) => {
-  try {
-    const snapshot = await db.collection("cleaners").get();
-    const cleaners = snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        name: data.name || data.Name || "",
-        email: data.email || data.Email || "",
-        status: (data.status || data.Status || "unknown").toLowerCase(),
-      };
-    });
-
-    res.status(200).json(cleaners);
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch cleaners" });
-  }
-});
-
-// 💳 M-PESA STK PUSH
-app.post("/mpesa/stk-push", async (req, res) => {
-  const { phoneNumber, amount } = req.body;
-
-  if (!phoneNumber || !amount) {
-    return res.status(400).json({ error: "Phone number and amount are required" });
-  }
-
-  const formattedPhone = phoneNumber.replace(/^0/, "254");
-
-  try {
-    const consumerKey = process.env.MPESA_CONSUMER_KEY;
-    const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
-    const auth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString("base64");
-
-    const tokenRes = await axios.get(
-      "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
-      { headers: { Authorization: `Basic ${auth}` } }
-    );
-
-    const accessToken = tokenRes.data.access_token;
-
-    const timestamp = moment().format("YYYYMMDDHHmmss");
-    const password = Buffer.from(
-      `${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`
-    ).toString("base64");
-
-    const stkRes = await axios.post(
-      "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
-      {
-        BusinessShortCode: process.env.MPESA_SHORTCODE,
-        Password: password,
-        Timestamp: timestamp,
-        TransactionType: "CustomerPayBillOnline",
-        Amount: amount,
-        PartyA: formattedPhone,
-        PartyB: process.env.MPESA_SHORTCODE,
-        PhoneNumber: formattedPhone,
-        CallBackURL: process.env.MPESA_CALLBACK_URL,
-        AccountReference: "HomeCleaning",
-        TransactionDesc: "Home Cleaning Payment",
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }
-    );
-
-    res.status(200).json({ message: "STK Push initiated", data: stkRes.data });
-  } catch (error) {
-    console.error("❌ STK Push Error:", error.response?.data || error.message);
-    res.status(500).json({
-      error: "Failed to initiate STK Push",
-      details: error.response?.data || error.message,
-    });
-  }
-});
-
-// 📥 M-PESA Callback Handler
-app.post("/mpesa/callback", async (req, res) => {
-  console.log("📥 M-PESA Callback received");
-
-  const callbackData = req.body;
-
-  try {
-    const mpesaRes = callbackData?.Body?.stkCallback;
-
-    if (!mpesaRes) {
-      console.warn("⚠ Missing stkCallback in callback");
-      return res.sendStatus(200);
-    }
-
-    const {
-      MerchantRequestID,
-      CheckoutRequestID,
-      ResultCode,
-      ResultDesc,
-      CallbackMetadata,
-    } = mpesaRes;
-
-    const metadata = CallbackMetadata?.Item?.reduce((acc, item) => {
-      acc[item.Name] = item.Value;
-      return acc;
-    }, {});
-
-    await db.collection("mpesaTransactions").add({
-      MerchantRequestID,
-      CheckoutRequestID,
-      ResultCode,
-      ResultDesc,
-      metadata,
-      receivedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    console.log("✅ M-PESA transaction saved:", metadata);
-    res.sendStatus(200);
-  } catch (error) {
-    console.error("❌ Error handling callback:", error.message);
-    res.sendStatus(200);
-  }
-});
-
-// 🚀 Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+// ─── Routes (keep the rest of your file as-is) ──────────────────────────────
