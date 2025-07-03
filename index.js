@@ -86,7 +86,7 @@ app.get("/cleaners", async (req, res) => {
         status: (data.status || data.Status || "unknown").toLowerCase(),
       };
     });
-    console.log(✅  ${cleaners.length} cleaners returned);
+    console.log(`✅  ${cleaners.length} cleaners returned`);
     res.json(cleaners);
   } catch (err) {
     console.error("🔥  Firestore error:", err.message);
@@ -106,17 +106,17 @@ app.post("/mpesa/stk-push", async (req, res) => {
 
   try {
     const auth = Buffer.from(
-      ${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}
+      `${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`
     ).toString("base64");
 
     const { data: tokenData } = await axios.get(
       "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
-      { headers: { Authorization: Basic ${auth} } }
+      { headers: { Authorization: Basic `${auth}` } }
     );
 
     const timestamp = moment().format("YYYYMMDDHHmmss");
     const password  = Buffer.from(
-      ${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}
+      `${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`
     ).toString("base64");
 
     const { data: stkData } = await axios.post(
@@ -137,7 +137,10 @@ app.post("/mpesa/stk-push", async (req, res) => {
       { headers: { Authorization: `Bearer ${tokenData.access_token}` } }
     );
 
-    res.json({ message: "STK Push initiated", data: stkData });
+    res.json({
+       message: "STK Push initiated", 
+       data: stkRes.Data, 
+      });
   } catch (err) {
     console.error("❌ STK Push Error:", err.response?.data || err.message);
     res.status(500).json({ error: "Failed to initiate STK Push", details: err.message });
